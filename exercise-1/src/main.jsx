@@ -1,25 +1,50 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from '@tanstack/react-query';
 import './styles.css';
 
+const queryClient = new QueryClient();
+
+async function fetchProducts() {
+  const response = await fetch('https://dummyjson.com/products');
+
+  if (!response.ok) {
+    throw new Error('Unable to load products.');
+  }
+
+  const result = await response.json();
+  return result.products;
+}
+
 function App() {
-  // TODO:
-  // 1. Configure TanStack Query and QueryClientProvider.
-  // 2. Create the product query using useQuery().
-  // 3. Implement the required query key, query function and cache settings.
-  // 4. Add loading, fetching, error and success states.
-  // 5. Add search and Refresh Products functionality.
-  // 6. Add React Query DevTools.
+  const productsQuery = useQuery({
+    queryKey: ['products'],
+    queryFn: fetchProducts,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+  });
 
   return (
     <main className="container">
       <h1>Exercise 1: Product Listing</h1>
       <p className="hint">
-        Implement product fetching, caching, query keys, loading states, search, and background fetching.
+        Product query configured with TanStack Query.
       </p>
-      {/* TODO: Build the product listing UI */}
+      <p className="meta">
+        {productsQuery.data
+          ? `${productsQuery.data.length} products loaded.`
+          : 'Product data will be displayed in the next step.'}
+      </p>
     </main>
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+  <QueryClientProvider client={queryClient}>
+    <App />
+  </QueryClientProvider>,
+);
