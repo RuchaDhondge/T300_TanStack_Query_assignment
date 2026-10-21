@@ -11,6 +11,7 @@ import './styles.css';
 
 const queryClient = new QueryClient();
 const createdUsers = [];
+const deletedUserIds = new Set();
 
 async function fetchUsers() {
   try {
@@ -21,7 +22,9 @@ async function fetchUsers() {
     }
 
     const result = await response.json();
-    return [...createdUsers, ...result.users];
+    return [...createdUsers, ...result.users].filter(
+      (user) => !deletedUserIds.has(user.id),
+    );
   } catch (error) {
     throw new Error('Unable to load users.', { cause: error });
   }
@@ -46,6 +49,31 @@ async function createUser(user) {
   }
 }
 
+async function deleteUser({ userId, simulateFailure }) {
+  if (simulateFailure) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    throw new Error('Delete failed as requested.');
+  }
+
+  const isCreatedUser = createdUsers.some((user) => user.id === userId);
+
+  if (!isCreatedUser) {
+    try {
+      const response = await fetch(`https://dummyjson.com/users/${userId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}.`);
+      }
+    } catch (error) {
+      throw new Error('Unable to delete user.', { cause: error });
+    }
+  }
+
+  return userId;
+}
+
 function useUsers() {
   return useQuery({
     queryKey: ['users'],
@@ -65,14 +93,53 @@ function useCreateUser() {
   });
 }
 
+function useDeleteUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: deleteUser,
+    onMutate: async ({ userId }) => {
+      await queryClient.cancelQueries({ queryKey: ['users'] });
+
+      const previousUsers = queryClient.getQueryData(['users']);
+
+      queryClient.setQueryData(['users'], (users) =>
+        users?.filter((user) => user.id !== userId),
+      );
+
+      return { previousUsers };
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(['users'], context?.previousUsers);
+    },
+    onSuccess: (userId) => {
+      const createdUserIndex = createdUsers.findIndex(
+        (user) => user.id === userId,
+      );
+
+      if (createdUserIndex >= 0) {
+        createdUsers.splice(createdUserIndex, 1);
+      } else {
+        deletedUserIds.add(userId);
+      }
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
 function App() {
   const [form, setForm] = React.useState({
     name: '',
     email: '',
     role: 'user',
   });
+  const [simulateDeleteFailure, setSimulateDeleteFailure] =
+    React.useState(false);
   const usersQuery = useUsers();
   const createUserMutation = useCreateUser();
+  const deleteUserMutation = useDeleteUser();
 
   function updateField(event) {
     setForm((current) => ({
@@ -98,6 +165,14 @@ function App() {
         },
       },
     );
+  }
+
+  function handleDelete(userId) {
+    deleteUserMutation.mutate({
+      userId,
+      simulateFailure: simulateDeleteFailure,
+    });
+    setSimulateDeleteFailure(false);
   }
 
   return (
@@ -168,6 +243,29 @@ function App() {
       {usersQuery.isSuccess && (
         <>
           <p className="message">{usersQuery.data.length} users loaded.</p>
+          <label className="failure-toggle">
+            <input
+              type="checkbox"
+              checked={simulateDeleteFailure}
+              onChange={(event) =>
+                setSimulateDeleteFailure(event.target.checked)
+              }
+            />
+            Simulate the next delete failure to verify rollback
+          </label>
+
+          {deleteUserMutation.isSuccess && (
+            <p className="message" role="status">
+              User deleted successfully.
+            </p>
+          )}
+
+          {deleteUserMutation.isError && (
+            <p className="error" role="alert">
+              {deleteUserMutation.error.message} The user was restored.
+            </p>
+          )}
+
           <section className="list" aria-label="Users">
             {usersQuery.data.map((user) => (
               <article className="user" key={user.id}>
@@ -178,6 +276,16 @@ function App() {
                   <span>{user.email}</span>
                   <small>{user.role}</small>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(user.id)}
+                  disabled={deleteUserMutation.isPending}
+                >
+                  {deleteUserMutation.isPending &&
+                  deleteUserMutation.variables?.userId === user.id
+                    ? 'Deleting...'
+                    : 'Delete'}
+                </button>
               </article>
             ))}
           </section>
