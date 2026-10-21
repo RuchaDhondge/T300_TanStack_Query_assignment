@@ -9,8 +9,11 @@ import './styles.css';
 
 const queryClient = new QueryClient();
 
-async function fetchProducts() {
-  const response = await fetch('https://dummyjson.com/products');
+async function fetchProducts(searchTerm) {
+  const endpoint = searchTerm
+    ? `https://dummyjson.com/products/search?q=${encodeURIComponent(searchTerm)}`
+    : 'https://dummyjson.com/products';
+  const response = await fetch(endpoint);
 
   if (!response.ok) {
     throw new Error('Unable to load products.');
@@ -21,24 +24,78 @@ async function fetchProducts() {
 }
 
 function App() {
+  const [searchTerm, setSearchTerm] = React.useState('');
   const productsQuery = useQuery({
-    queryKey: ['products'],
-    queryFn: fetchProducts,
+    queryKey: ['products', { search: searchTerm }],
+    queryFn: () => fetchProducts(searchTerm),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
+    networkMode: 'always',
   });
 
   return (
     <main className="container">
       <h1>Exercise 1: Product Listing</h1>
       <p className="hint">
-        Product query configured with TanStack Query.
+        Search products while TanStack Query manages the server state.
       </p>
-      <p className="meta">
-        {productsQuery.data
-          ? `${productsQuery.data.length} products loaded.`
-          : 'Product data will be displayed in the next step.'}
-      </p>
+      <div className="search">
+        <input
+          type="search"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Search products"
+          aria-label="Search products"
+        />
+        <button
+          type="button"
+          onClick={() => productsQuery.refetch()}
+          disabled={productsQuery.isFetching}
+        >
+          {productsQuery.isFetching ? 'Refreshing...' : 'Refresh Products'}
+        </button>
+      </div>
+
+      {productsQuery.isPending && (
+        <p className="status">Loading products...</p>
+      )}
+
+      {productsQuery.isError && !productsQuery.data && (
+        <p className="error" role="alert">
+          {productsQuery.error.message}
+        </p>
+      )}
+
+      {productsQuery.isError && productsQuery.data && (
+        <p className="error" role="alert">
+          Refresh failed: {productsQuery.error.message}
+        </p>
+      )}
+
+      {productsQuery.isFetching && !productsQuery.isPending && (
+        <p className="fetching" role="status">
+          Fetching updated products...
+        </p>
+      )}
+
+      {productsQuery.isSuccess && (
+        <>
+          <p className="success">
+            {productsQuery.data.length} product
+            {productsQuery.data.length === 1 ? '' : 's'} found.
+          </p>
+          <div className="grid">
+            {productsQuery.data.map((product) => (
+              <article className="card" key={product.id}>
+                <img src={product.thumbnail} alt="" />
+                <h2>{product.title}</h2>
+                <p>{product.category}</p>
+                <strong>${product.price}</strong>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
     </main>
   );
 }
